@@ -1,0 +1,449 @@
+library ieee;
+use IEEE.std_logic_1164.all;
+use IEEE.numeric_std.all;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+ENTITY Maquina_de_Refri is
+PORT(
+	clock 	:in std_logic;
+	button1	:in std_logic;
+	button2	:in std_LOGIC;
+	button3	:in std_logic;
+	switch	:in std_logic_vector (9 downto 0);
+	leds		:out std_logic_vector (9 downto 0);
+	seg_1    :out std_logic_vector (6 downto 0);
+	seg_2    :out std_logic_vector (6 downto 0);
+	seg_3    :out std_logic_vector (6 downto 0);
+	seg_4    :out std_logic_vector (6 downto 0)
+);
+
+END ENTITY Maquina_de_Refri;
+
+
+ARCHITECTURE arq OF Maquina_de_Refri IS
+
+COMPONENT dec7seg is
+port (
+		bin : in std_logic_vector(3 downto 0);  --BCD input
+      seg : out std_logic_vector(6 downto 0)  -- 7 bit decoded output.
+    );
+END COMPONENT;
+
+COMPONENT debounce is
+GENERIC(
+    counter_size  :  INTEGER := 19); --counter size (19 bits gives 10.5ms with 50MHz clock)
+  PORT(
+    clk     : IN  STD_LOGIC;  --input clock
+    button  : IN  STD_LOGIC;  --input signal to be debounced
+    result  : OUT STD_LOGIC); --debounced signal
+END COMPONENT;
+
+TYPE stateB is (state6, state7, state8, state9, state10, state11, state12, state13);
+
+SIGNAL t_r_1, t_r_2, t_r_3, t_r_4, t_r_5: std_logic := '1';
+
+SIGNAL total		:  integer range 0 to 1000 := 0;
+SIGNAL preco		:  integer range 0 to 350;
+
+SIGNAL counter : integer range 0 to 50000000;
+SIGNAL pr_state2, nx_state2 :stateB := state6;
+SIGNAL soda		: std_logic_vector (2 downto 0) := "111";
+SIGNAL reset	: std_logic;
+SIGNAL bounce1	: std_logic;
+SIGNAL bounce2	: std_LOGIC;
+SIGNAL bounce3	: std_logic;
+
+SIGNAL clock1	: std_LOGIC;
+
+SIGNAL bit_n1 	: std_logic_vector (3 downto 0):= "1111";
+SIGNAL bit_n2 	: std_logic_vector (3 downto 0):= "1111";
+SIGNAL bit_n3	: std_logic_vector (3 downto 0):= "1111";
+SIGNAL bit_n4  : std_logic_vector (3 downto 0):= "1111";
+
+SIGNAL dec1		: integer range 0 to 9 := 0;
+SIGNAL dec2		: integer range 0 to 9 := 0;
+SIGNAL dec3		: integer range 0 to 9 := 0;
+SIGNAL dec4		: integer range 0 to 9 := 0;
+
+CONSTANT preco1: std_logic_vector (11 downto 0):= "000001010000";
+CONSTANT preco2: std_logic_vector (11 downto 0):= "000100000000";
+CONSTANT preco3: std_logic_vector (11 downto 0):= "000101010000";
+CONSTANT preco4: std_logic_vector (11 downto 0):= "001001110101";
+CONSTANT preco5: std_logic_vector (11 downto 0):= "001101010000";
+
+BEGIN
+
+leds(0) <= t_r_1;
+leds(1) <= t_r_2;
+leds(2) <= t_r_3;
+leds(3) <= t_r_4;
+leds(4) <= t_r_5;
+reset <= bounce3;
+
+PROCESS(clock, reset)
+	BEGIN
+		if(reset = '1') then
+			clock1 <= '0';
+			counter <= 0;
+		elsif(rising_edge(clock)) then
+			if(counter = 5000000) then
+				clock1 <= not(clock1);
+				counter <= 0;
+			else
+				counter <= counter + 1;
+			end if;
+		end if;
+	END PROCESS;
+
+PROCESS (clock1)
+	BEGIN
+		if(rising_edge(clock)) then
+			pr_state2 <= nx_state2;
+		end if;
+END PROCESS;
+	
+PROCESS(pr_state2, reset)
+
+VARIABLE coin		: std_logic_vector (3 downto 0) := "1111";
+VARIABLE valoratual :  integer range 0 to 1000 := 0;
+
+	BEGIN
+		if(reset = '0') then
+			valoratual := 0; -- zera valor atual.
+			total <= 0;
+			
+			t_r_1 <= '1';
+			t_r_2 <= '1';
+			t_r_3 <= '1';
+			t_r_4 <= '1';
+			t_r_5 <= '1';
+			
+			leds(9 downto 7) <= (others => '0');
+			
+			nx_state2 <= state6;
+		
+		else
+			case pr_state2 is
+				when state6 =>
+					leds(9)<= '1';
+					leds(8 downto 7) <= "00";
+					-- Aqui precisamos receber qual refri foi escolhido pelo usuário.
+					-- Fica preso aqui até receber o valor.
+					-- Esse valor vai inflenciar o resto do caminho. 
+					-- atrelado a este valor também está o custo do refri. Precisamos de uma variável para isso.
+					-- para escolhar o valor é necessário selecionar o switch E apertar o botão.
+					valoratual := 0;
+					
+					if(switch(0) = '1') then
+						soda <= "000";
+					elsif(switch(1) = '1') then
+						soda <= "001";
+					elsif(switch(2) = '1') then
+						soda <= "010";
+					elsif(switch(3) = '1') then
+						soda <= "011";
+					elsif(switch(4) = '1') then
+						soda <= "100";
+					else
+						soda <= "111";
+					end if;			
+					
+					if (soda = "000") then -- arrumar entrada.
+						if t_r_1 = '1' then -- testa se tem refri no estoque.
+							bit_n1 <= preco1(3 downto 0);
+							bit_n2 <= preco1(7 downto 4);
+							bit_n3 <= preco1(11 downto 8);
+							nx_state2 <= state6; -- segue para o próximo estado.
+							if(bounce1 = '0') then
+								nx_state2 <= state7;
+								preco <= 50;
+							end if;					
+						else
+							bit_n1 <= "0000"; -- se não tem refri continua recebendo zero.
+							bit_n2 <= "1111";
+							bit_n3 <= "1111";
+							bit_n4 <= "1111";
+							nx_state2 <= state6; -- continua preso no S6.
+						end if;
+					
+					elsif (soda = "001") then -- arrumar entrada.
+						if t_r_2 = '1' then -- testa se tem refri no estoque.
+							bit_n1 <= preco2(3 downto 0);
+							bit_n2 <= preco2(7 downto 4);
+							bit_n3 <= preco2(11 downto 8);
+							nx_state2 <= state6; -- segue para o próximo estado.
+							if(bounce1 = '0') then
+								nx_state2 <= state7;
+								preco <= 100;
+							end if;					
+						else
+							bit_n1 <= "0000"; -- se não tem refri continua recebendo zero.
+							bit_n2 <= "1111";
+							bit_n3 <= "1111";
+							bit_n4 <= "1111";
+							nx_state2 <= state6; -- continua preso no S6.
+						end if;
+						
+					elsif (soda = "010") then -- arrumar entrada.
+						if t_r_3 = '1' then -- testa se tem refri no estoque.
+							bit_n1 <= preco3(3 downto 0);
+							bit_n2 <= preco3(7 downto 4);
+							bit_n3 <= preco3(11 downto 8);
+							nx_state2 <= state6; -- segue para o próximo estado.
+							if(bounce1 = '0') then
+								nx_state2 <= state7;
+								preco <= 150;
+							end if;					
+						else
+							bit_n1 <= "0000"; -- se não tem refri continua recebendo zero.
+							bit_n2 <= "1111";
+							bit_n3 <= "1111";
+							bit_n4 <= "1111";
+							nx_state2 <= state6; -- continua preso no S6.
+						end if;	
+							
+					elsif (soda = "011") then -- arrumar entrada.
+						if t_r_1 = '1' then -- testa se tem refri no estoque.
+							bit_n1 <= preco4(3 downto 0);
+							bit_n2 <= preco4(7 downto 4);
+							bit_n3 <= preco4(11 downto 8);
+							nx_state2 <= state6; -- segue para o próximo estado.
+							if(bounce1 = '0') then
+								nx_state2 <= state7;
+								preco <= 275;
+							end if;					
+						else
+							bit_n1 <= "0000"; -- se não tem refri continua recebendo zero.
+							bit_n2 <= "1111";
+							bit_n3 <= "1111";
+							bit_n4 <= "1111";
+							nx_state2 <= state6; -- continua preso no S6.
+						end if;
+						
+					elsif (soda = "100") then -- arrumar entrada.
+						if t_r_1 = '1' then -- testa se tem refri no estoque.
+							bit_n1 <= preco5(3 downto 0);
+							bit_n2 <= preco5(7 downto 4);
+							bit_n3 <= preco5(11 downto 8);
+							nx_state2 <= state6; -- segue para o próximo estado.
+							if(bounce1 = '0') then
+								nx_state2 <= state7;
+								preco <= 350;
+							end if;					
+						else
+							bit_n1 <= "0000"; -- se não tem refri continua recebendo zero.
+							bit_n2 <= "1111";
+							bit_n3 <= "1111";
+							bit_n4 <= "1111";
+							nx_state2 <= state6; -- continua preso no S6.
+						end if;
+						
+					else
+						bit_n1 <= "0000"; -- se não tem refri continua recebendo zero.
+						bit_n2 <= "1111";
+						bit_n3 <= "1111";
+						bit_n4 <= "1111";
+						nx_state2 <= state6; -- continua preso no S6.
+					end if;	
+					
+				when state7 =>
+					leds(9)<= '0';
+					leds(8)<= '1';
+					-- Pagamento é aqui. 
+					-- valor atual vai recebendo moedas e fica preso no estado até igualar/passar valor do refri.
+					-- valor atual precisa ser apresentado a cada moeda.
+					dec1 <= valoratual mod 10;
+					dec2 <= valoratual mod 100;
+					dec3 <= valoratual mod 1000;
+					dec4 <= valoratual mod 10000;
+					
+					bit_n1 <= std_logic_vector(to_unsigned(dec1, 4));
+					bit_n2 <= std_logic_vector(to_unsigned(dec2, 4));
+					bit_n3 <= std_logic_vector(to_unsigned(dec3, 4));
+					bit_n4 <= std_logic_vector(to_unsigned(dec4, 4));	
+					
+					if(switch(0) = '1') then -- converte valor do switch para a moeda.
+						coin := "0000";
+					elsif(switch(1) = '1') then
+						coin := "0001";
+					elsif(switch(2) = '1') then
+						coin := "0010";
+					elsif(switch(3) = '1') then
+						coin := "0011";
+					elsif(switch(4) = '1') then
+						coin := "0100";
+					elsif(switch(5)= '1') then
+						coin := "0101";
+					elsif(switch(6)= '1') then
+						coin := "0111";
+					else
+						coin := "1111";
+					end if;				
+					
+					-- modelo:
+					-- if entrada == 1, soma 5, testa se valoratual >= preco. if valoratual<preco, proximoestado <= state7, else proximoestado <= state8.
+					-- elsif entrada == 2, soma 10, testa se valoratual >= preco. if valoratual<preco, proximoestado <= state7, else proximoestado <= state8.
+					-- elsif entrada == 3, soma 25, testa se valoratual >= preco. if valoratual<preco, proximoestado <= state7, else proximoestado <= state8.
+					
+					if coin = "0000" and bounce2 = '0' then -- pegar o valor do switch, E apertar o botão. 
+						valoratual := 5 + valoratual; -- soma valor da moeda ao valoratual. cinco centavos
+						if valoratual < preco then -- enquanto valor atual é menor que o preco, segue no mesmo estado.
+							nx_state2 <= state7; 
+						else
+							nx_state2 <= state8;
+						end if;
+						
+						elsif coin = "0001" and bounce2 = '0' then
+							valoratual := 10 + valoratual; -- 10 centavos
+							if valoratual < preco then
+								nx_state2 <= state7;
+							else
+								nx_state2 <= state8;
+							end if;
+							
+						elsif coin = "0010" and bounce2 = '0' then
+							valoratual := 25 + valoratual; -- 25 centavos
+							if valoratual < preco then
+								nx_state2 <= state7;
+							else
+								nx_state2 <= state8;
+							end if;
+							
+						elsif coin = "0011" and bounce2 = '0' then
+							valoratual := 50 + valoratual; -- 50 centavos
+							if valoratual < preco then
+								nx_state2 <= state7;
+							else
+								nx_state2 <= state8;
+							end if;
+						
+						elsif coin = "0100" and bounce2 = '0' then
+							valoratual := 100 + valoratual; -- 100 centavos
+							if valoratual < preco then
+								nx_state2 <= state7;
+							else
+								nx_state2 <= state8;
+							end if;					
+						
+						elsif coin = "0101" and bounce2 = '0' then
+							valoratual := 200 + valoratual; -- 200 centavos
+							if valoratual < preco then
+								nx_state2 <= state7;
+							else
+								nx_state2 <= state8;
+							end if;
+							
+						elsif switch = "0110" and bounce2 = '0' then
+							valoratual := 500 + valoratual;
+							if valoratual < preco then
+								nx_state2 <= state7;
+							else
+								nx_state2 <= state8;
+							end if;
+						else
+							nx_state2 <= state7; -- enquanto nada mais acontece, fica preso por ai.
+						end if;
+						
+				when state8 => 
+					leds(8)<= '0';
+					leds(7)<= '1';
+					--if valoratual == preco segue para o 9.
+					if (valoratual = preco) then
+						nx_state2 <= state9;
+					-- if valoratual > preco, segue para o 12.
+					else
+						nx_state2 <= state12;
+					end if; 
+					
+				when state9 =>
+					leds(9 downto 7) <= "000";
+					-- add valoratual ao TOTAL.
+					total <= total + valoratual;
+					-- segue para o 10.
+					nx_state2 <= state10;
+					
+				when state10 =>
+				leds(9 downto 7) <= "000";
+					-- exibe TOTAL.
+					dec1 <= total mod 10;
+					dec2 <= total mod 100;
+					dec3 <= total mod 1000;
+					dec4 <= total mod 10000;
+					
+					bit_n1 <= std_logic_vector(to_unsigned(dec1, 4));
+					bit_n2 <= std_logic_vector(to_unsigned(dec2, 4));
+					bit_n3 <= std_logic_vector(to_unsigned(dec3, 4));
+					bit_n4 <= std_logic_vector(to_unsigned(dec4, 4));	
+					
+					-- segue para estado 11
+					if(bounce1 = '0') then
+						nx_state2 <= state11;
+					else
+						nx_state2 <= state10;
+					end if;
+					
+				when state11 =>
+		leds(9 downto 7) <= "000";		
+					-- retira refri x do estoque.
+					if (soda = "0000") then -- sequencia equivalente a um switch recebe o número do refri e zera t_r_x
+						t_r_1 <= '0';
+					elsif (soda = "0001") then
+						t_r_2 <= '0';
+					elsif (soda = "0010") then
+						t_r_3 <= '0';
+					elsif (soda = "0011") then
+						t_r_4 <= '0';
+					else
+						t_r_5 <= '0';
+					end if;
+					
+					-- volta para estado 1.
+					nx_state2 <= state6;
+						
+				when state12 =>
+				leds(9 downto 7) <= "000";
+					total <= total + valoratual;
+					-- if troco > total, segue para 14.
+					--if (valoratual - preco) > total then
+						--nx_state2 <= state14;
+					-- if troco <= total, segue para 13.
+					--else
+					nx_state2 <= state13;
+					--end if;
+					
+				when state13 => 
+				leds(9 downto 7) <= "000";
+					-- apresenta preco - dinheiro.
+					dec1 <= (valoratual - preco) mod 10;
+					dec2 <= (valoratual - preco) mod 100;
+					dec3 <= (valoratual - preco) mod 1000;
+					dec4 <= (valoratual - preco) mod 10000;
+					
+					bit_n1 <= std_logic_vector(to_unsigned(dec1, 4));
+					bit_n2 <= std_logic_vector(to_unsigned(dec2, 4));
+					bit_n3 <= std_logic_vector(to_unsigned(dec3, 4));
+					bit_n4 <= std_logic_vector(to_unsigned(dec4, 4));	
+					
+					total <= total - (valoratual - preco);
+					-- segue para estado 10.
+					if(bounce1 = '0') then
+						nx_state2 <= state10;
+					else
+						nx_state2 <= state13;
+					end if;
+					
+			end case;
+		end if;
+	END PROCESS;
+	
+		seg1: dec7seg PORT MAP (bin => bit_n1, seg => seg_1);
+		seg2: dec7seg PORT MAP (bin => bit_n2, seg => seg_2);
+		seg3: dec7seg PORT MAP (bin => bit_n3, seg => seg_3);
+		seg4: dec7seg PORT MAP (bin => bit_n4, seg => seg_4);
+		
+		button_1: debounce PORT MAP (clk=> clock, button => button1, result => bounce1);
+		button_2: debounce PORT MAP (clk=> clock, button => button2, result => bounce2);
+		button_3: debounce PORT MAP (clk=> clock, button => button3, result => bounce3);	
+		
+END ARCHITECTURE arq;	
